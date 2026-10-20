@@ -81,7 +81,7 @@ class Limits {
 
   // 값이 비어 있을 때 화면에 띄울 짧은 이유
   hint() {
-    const API = { nocred: '로그인 정보 없음', expired: '로그인 만료 · Claude 실행 필요', auth: '인증 실패', http: '조회 실패', net: '조회 실패', shape: '조회 실패', timeout: '조회 시간 초과', crash: '조회 오류', refreshing: '로그인 갱신 중…' };
+    const API = { nocred: 'claude 로그인 필요', expired: '로그인 만료 · Claude 실행 필요', auth: '인증 실패', http: '조회 실패', net: '조회 실패', shape: '조회 실패', timeout: '조회 시간 초과', crash: '조회 오류', refreshing: '로그인 갱신 중…' };
     if (this.apiOn && this.apiErr) return API[this.apiErr] || '조회 실패';
     if (this.seen && !this.hasRl) return '한도 정보 없음';
     return this.apiOn ? '조회 중…' : '상태줄 신호 없음';

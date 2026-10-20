@@ -75,6 +75,15 @@ function getStatus() {
   console.log('\n[2] 브리지 파일');
   if (fs.existsSync(path.join(petDir, 'statusline.js'))) ok(`${petDir}/statusline.js 있음`);
   else bad(`${petDir}/statusline.js 가 없어요`, `\`npm run ${profile.installScript}\` 를 실행하세요`);
+  if (process.platform === 'win32') {
+    if (fs.existsSync(path.join(petDir, 'hook.js'))) ok(`${petDir}/hook.js 있음`);
+    else bad(`${petDir}/hook.js 가 없어요`, '`npm run install-hooks` 를 실행하세요');
+    try {
+      info(`node: ${execFileSync('node', ['-v'], { encoding: 'utf8', timeout: 5000, shell: true, windowsHide: true }).trim()} (훅이 \`node\` 명령을 써요. 새 터미널/세션에서 안 잡히면 Node.js 를 다시 설치하세요)`);
+    } catch {
+      bad('`node` 명령을 찾지 못해요 (훅이 이 명령으로 실행돼요)', 'Node.js 를 설치하고 Claude Code 를 다시 시작하세요');
+    }
+  }
 
   console.log('\n[3] 펫 앱');
   const st = await getStatus();

@@ -10,13 +10,14 @@ Claude Code(또는 Claude 데스크톱 앱의 Code 탭)에서 이렇게 말하�
 
 > https://github.com/Harub/claude-pet-win 설치해줘
 
-Claude 가 저장소의 `INSTALL.md` 를 읽고 받기부터 설치, 실행까지 알아서 해요. 필요한 건 Claude Code 와 인터넷뿐이에요. (Node.js 가 없으면 Claude 가 설치해요)
+Claude 가 저장소의 `INSTALL.md` 를 읽고 받기부터 설치, 실행까지 알아서 해요. 필요한 건 Claude Code 와 인터넷뿐이에요. (Node.js 가 없으면 Claude 가 설치해요) 사용량 로그인이 필요하면 Claude 가 한 번 물어봐요.
 직접 설치하고 싶다면 아래 "설치 (3분)"를 따르세요.
 
 ## 필요한 것
 - Windows 10 / 11
 - [Node.js](https://nodejs.org/ko) 18 이상 (설치할 때만 필요해요. LTS 버전을 받으세요)
-- Claude Code (터미널의 `claude`). 윈도우용 Claude Code는 [Git for Windows](https://git-scm.com/download/win) 가 있어야 동작하는데, 펫도 Claude Code가 쓰는 그 환경(Git Bash)으로 신호를 받아요.
+- Claude Code (터미널의 `claude` 또는 Claude 데스크톱 앱의 Code 탭)
+- 사용량 막대를 보려면 Claude Code **터미널** 로그인이 한 번 필요해요. (`claude auth login`) 데스크톱 앱 로그인과는 따로예요. 로그인이 없으면 사용량 막대에 `claude 로그인 필요`가 떠요. 나머지 기능은 로그인 없이도 돼요.
 
 ## 설치 (3분)
 1. 이 저장소를 받아서(Code 버튼 → Download ZIP) 압축을 풀고, 폴더를 원하는 곳에 두세요. 설치한 뒤에도 지우지 말고 그 자리에 두세요. (예: `C:\Users\내이름\Developer\claude-pet`)
@@ -70,7 +71,7 @@ Claude 에게 "claude-pet 업데이트해줘"라고 하거나, 새 버전을 받
 - 지원하는 건 Claude Code 세션이에요. claude.ai의 일반 채팅과 클라우드 세션은 볼 수 없어요.
 - 앱이 서명되지 않은 개인용 앱이라 자동 업데이트되지 않아요.
 - 허용/거부를 펫에서 직접 누르는 기능은 없어요. 카드를 누르면 Claude 앱의 해당 세션이 열려요.
-- 사용량 막대는 터미널의 `claude`에서 가장 확실하게 들어와요. Claude 데스크톱 앱의 Code 탭만 쓸 때는 로그인 파일이 있어야 사용량이 보여요.
+- 사용량은 `%USERPROFILE%\.claude\.credentials.json`(터미널 로그인)을 읽어요. 데스크톱 앱만 쓰고 터미널 로그인이 없으면 사용량 막대가 비어 있어요.
 
 ## 라이선스
 MIT

@@ -67,11 +67,6 @@ function waitForPet(seconds) {
   })();
 }
 
-function hasGitBash() {
-  const pf = process.env.ProgramFiles || 'C:\\Program Files';
-  return [process.env.CLAUDE_CODE_GIT_BASH_PATH, path.join(pf, 'Git', 'bin', 'bash.exe'), path.join(local, 'Programs', 'Git', 'bin', 'bash.exe')].some((p) => p && fs.existsSync(p));
-}
-
 async function install() {
   const major = Number(process.versions.node.split('.')[0]);
   if (major < 18) fail(`Node.js 18 이상이 필요해요 (지금 ${process.version}). https://nodejs.org/ko 에서 LTS 버전을 설치한 뒤 다시 실행하세요.`);
@@ -96,8 +91,14 @@ async function install() {
   console.log(up ? '✅ 설치 완료: 펫이 켜졌어요.' : launched ? '⚠️ 설치는 끝났지만 펫 응답을 확인하지 못했어요. 화면에 펫이 보이는지 확인하고, 안 보이면 `npm run doctor` 를 실행해 보세요.' : '⚠️ 설치는 끝났지만 펫을 자동으로 켜지 못했어요. ' + (WIN ? '시작 메뉴에서 "Claude Pet" 을 실행하세요.' : '"Claude Pet" 을 실행하세요.'));
   console.log('• 이미 켜져 있던 Claude Code 세션은 새로 시작해야 펫이 반응해요.');
   console.log(`• 이 폴더(${__dirname})는 지우지 말고 두세요. 업데이트/점검에 써요.`);
-  if (WIN && !hasGitBash()) console.log('• 참고: Git for Windows(Git Bash)가 보이지 않아요. Claude Code 훅이 Git Bash 로 실행되므로, 펫이 반응하지 않으면 https://git-scm.com/download/win 을 설치하세요.');
-  if (spawnSync('claude', ['--version'], { stdio: 'ignore', shell: WIN }).status !== 0) console.log('• 참고: `claude` 명령을 찾지 못했어요. Claude Code 가 설치돼 있는지 확인하세요.');
+  // 사용량 막대는 Claude Code(터미널)의 로그인 파일을 읽는다. Claude 데스크톱 앱의 로그인과는 따로라서, 터미널 로그인이 없으면 파일이 없다.
+  const hasClaude = spawnSync('claude', ['--version'], { stdio: 'ignore', shell: WIN }).status === 0;
+  if (!fs.existsSync(path.join(profile.configDir, '.credentials.json'))) {
+    console.log('USAGE_LOGIN_NEEDED: 사용량 막대를 보려면 Claude Code 터미널 로그인이 한 번 필요해요. (데스크톱 앱 로그인과는 별개예요)');
+    console.log(hasClaude ? '  → `claude auth login` 을 실행하고 브라우저에서 로그인하세요. 끝나면 펫이 알아서 사용량을 불러와요.' : WIN ? '  → `claude` 명령이 없어요. PowerShell 에서 `irm https://claude.ai/install.ps1 | iex` 로 설치한 뒤, 새 터미널에서 `claude auth login` 을 실행하세요.' : '  → `claude` 명령이 없어요. https://claude.ai/install.sh 로 설치한 뒤 `claude auth login` 을 실행하세요.');
+  } else if (!hasClaude) {
+    console.log('• 참고: `claude` 명령을 찾지 못했어요. 로그인 만료 시 자동 갱신이 동작하지 않을 수 있어요.');
+  }
   process.exit(0);
 }
 

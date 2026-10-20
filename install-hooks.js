@@ -60,8 +60,13 @@ function claudeVersion() {
 }
 const cmp = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
 
+// 윈도우: Claude Code 는 훅을 Git Bash 또는 PowerShell 로 실행한다 (Git Bash 가 없으면 PowerShell).
+// 두 셸 모두에서 같은 뜻인 `node "<파일>"` 형태만 쓰고, 실제 일은 hook.js 가 한다. (curl/리다이렉션 문법은 쓰지 않는다)
+const WIN_HOOK = `node "${sh(path.join(profile.dataDir, 'hook.js'))}"`;
+const winCmd = (arg) => `${WIN_HOOK}${arg ? ' ' + arg : ''} ${HOOK_MARKER}`;
+
 const EVENTS = [
-  { name: 'SessionStart', cmd: process.platform === 'darwin' || WIN ? SESSION_START_CMD : null },
+  { name: 'SessionStart', cmd: WIN ? winCmd('--launch') : process.platform === 'darwin' ? SESSION_START_CMD : null },
   { name: 'UserPromptSubmit' },
   { name: 'PreToolUse', matcher: '*' },
   { name: 'PostToolUse', matcher: '*' },
@@ -94,6 +99,7 @@ const base = profile.configDir;
 const file = path.join(base, 'settings.json');
 const petDir = profile.dataDir;
 const bridgeFile = path.join(petDir, 'statusline.js');
+const hookFile = path.join(petDir, 'hook.js');
 const hookJson = path.join(petDir, 'hook.json');
 const STATUS_MARK = `${path.basename(petDir)}/statusline.js`; // 슬래시로 통일해서 비교한다 (윈도우 경로 대응)
 
@@ -127,7 +133,7 @@ for (const ev of [...EVENTS, ...EXTRA]) {
   const kept = list.filter((entry) => !isOurHook(entry)); // 예전에 넣은 우리 훅은 항상 먼저 제거
   const isExtra = EXTRA.includes(ev);
   if (!uninstall && (!isExtra || withExtra)) {
-    const entry = { hooks: [{ type: 'command', command: ev.cmd || HOOK_CMD }] };
+    const entry = { hooks: [{ type: 'command', command: ev.cmd || (WIN ? winCmd() : HOOK_CMD) }] };
     if (ev.matcher) entry.matcher = ev.matcher;
     kept.push(entry);
   }
@@ -150,6 +156,14 @@ try {
 }
 
 const fileOps = []; // settings.json 저장 직전에 실행할 파일 작업들
+if (!uninstall && WIN) {
+  // 윈도우 훅 실행기 (hook.js) 를 데이터 폴더에 둔다. 포트/앱 위치는 hook.json 에서 읽는다 (상태줄 설치 시 아래에서 다시 기록)
+  fileOps.push(() => {
+    fs.mkdirSync(petDir, { recursive: true });
+    fs.copyFileSync(path.join(__dirname, 'hook.js'), hookFile);
+    if (!fs.existsSync(hookJson)) fs.writeFileSync(hookJson, JSON.stringify({ port: PORT, orig: null, exe: WIN_EXE }, null, 2));
+  });
+}
 if (uninstall) {
   if (isOurStatus(settings.statusLine)) {
     if (savedOrig) settings.statusLine = savedOrig;
@@ -157,6 +171,7 @@ if (uninstall) {
   }
   fileOps.push(() => {
     fs.rmSync(bridgeFile, { force: true });
+    fs.rmSync(hookFile, { force: true });
     fs.rmSync(hookJson, { force: true });
   });
 } else if (withStatusline) {
@@ -164,7 +179,8 @@ if (uninstall) {
   const orig = isOurStatus(cur) ? savedOrig : cur && typeof cur === 'object' ? cur : null;
   const next = {
     type: 'command',
-    command: `"${sh(process.execPath)}" "${sh(bridgeFile)}"`,
+    // 윈도우: 상태줄도 Git Bash/PowerShell 어느 쪽에서든 읽히게 `node "<파일>"` 로 쓴다 (따옴표 붙은 exe 경로로 시작하면 PowerShell 이 못 읽는다)
+    command: WIN ? `node "${sh(bridgeFile)}"` : `"${sh(process.execPath)}" "${sh(bridgeFile)}"`,
   };
   if (orig && orig.padding != null) next.padding = orig.padding;
   if (orig && orig.refreshInterval != null) next.refreshInterval = orig.refreshInterval;
@@ -173,7 +189,7 @@ if (uninstall) {
   fileOps.push(() => {
     fs.mkdirSync(petDir, { recursive: true });
     fs.copyFileSync(path.join(__dirname, 'statusline.js'), bridgeFile);
-    fs.writeFileSync(hookJson, JSON.stringify({ port: PORT, orig }, null, 2));
+    fs.writeFileSync(hookJson, JSON.stringify({ port: PORT, orig, ...(WIN ? { exe: WIN_EXE } : {}) }, null, 2));
   });
 } else if (isOurStatus(settings.statusLine)) {
   // --no-statusline 인데 예전에 우리 상태줄을 넣어뒀다면 원래대로 되돌린다.
@@ -186,7 +202,7 @@ const after = JSON.stringify(settings, null, 2);
 if (before === after) {
   console.log(uninstall ? '제거할 펫 설정이 없어요.' : '이미 최신 상태로 설치돼 있어요.');
   // 브리지 스크립트는 최신 파일로 한 번 더 맞춰 둔다.
-  if (!uninstall && withStatusline && !dryRun) fileOps.forEach((op) => op());
+  if (!uninstall && !dryRun) fileOps.forEach((op) => op());
   process.exit(0);
 }
 

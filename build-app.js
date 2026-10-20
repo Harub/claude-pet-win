@@ -135,6 +135,7 @@ async function main() {
       /^\/tools($|\/)/,
       /^\/build-app\.js$/,
       /^\/setup\.js$/,
+      /^\/hook\.js$/,
     ],
   });
 
