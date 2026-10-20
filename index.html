@@ -1,0 +1,765 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'">
+<title>Claude Pet</title>
+<style>
+  :root {
+    --ink: #26302c;
+    --panel-bg: rgba(32, 36, 38, 0.94);
+    --panel-ink: #eef2f0;
+    --track: rgba(255, 255, 255, 0.14);
+    --ok: #7fd6b0;
+    --warn: #f2c14e;
+    --bad: #ef6b6b;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; background: transparent; overflow: hidden;
+    -webkit-user-select: none; user-select: none; cursor: default;
+    font-family: -apple-system, "SF Pro Text", "Apple SD Gothic Neo", "Segoe UI", "Malgun Gothic", "Noto Sans KR", sans-serif;
+  }
+  /* 세로 3칸: 위(말풍선) / 가운데(펫+막대, 고정) / 아래(위쪽 끝에서 말풍선이 내려오는 자리). 높이는 main.js 의 TOP/MID/BOT 와 같아야 해요. */
+  #stage { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; }
+  #zTop, #zBot { height: 170px; width: 100%; display: flex; justify-content: center; flex: none; }
+  #zTop { align-items: flex-end; }
+  #zBot { align-items: flex-start; }
+  #mid { height: 105px; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; padding-bottom: 4px; flex: none; }
+
+  /* ---- 한도 막대 (세션 / 주) ---- */
+  #limits {
+    margin-top: 6px; width: 134px; padding: 5px 8px; flex: none;
+    background: rgba(32, 36, 38, 0.88); color: var(--panel-ink); border-radius: 9px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, .25); font-size: 9.5px; line-height: 1;
+  }
+  .lim { display: flex; align-items: center; gap: 6px; height: 12px; }
+  .lim + .lim { margin-top: 3px; }
+  .lim .t { width: 24px; opacity: .7; white-space: nowrap; }
+  .lim .bar { flex: 1; height: 5px; border-radius: 3px; background: var(--track); overflow: hidden; }
+  .lim .bar i { display: block; height: 100%; width: 0; border-radius: 3px; background: var(--ok); transition: width .4s ease, background .3s; }
+  .lim .p { width: 28px; text-align: right; font-variant-numeric: tabular-nums; }
+  .lim.none { opacity: .45; }
+  #limHint { display: none; margin-top: 4px; font-size: 8.5px; opacity: .6; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* ---- 말풍선 ---- */
+  #bubble {
+    position: relative; max-width: 230px; margin-bottom: 8px; padding: 6px 11px;
+    background: rgba(255, 255, 255, .97); color: var(--ink); border-radius: 12px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, .2); text-align: center; font-size: 12px; line-height: 1.35;
+    transition: opacity .2s, transform .2s;
+  }
+  #bubble::after {
+    content: ""; position: absolute; left: 50%; bottom: -5px; width: 10px; height: 10px;
+    margin-left: -5px; background: inherit; transform: rotate(45deg); border-radius: 2px;
+  }
+  #bubble:not(.hide) { cursor: pointer; }
+  #bubble:not(.hide):hover { box-shadow: 0 2px 12px rgba(0, 0, 0, .3); }
+  #bubble.hide { opacity: 0; transform: translateY(4px); pointer-events: none; }
+  #bubble.below { margin-bottom: 0; margin-top: 8px; }
+  #bubble.below::after { bottom: auto; top: -5px; }
+  #bubble .main { font-weight: 600; }
+  /* 허용/확인이 필요할 때: 다른 말풍선과 한눈에 구분되는 빨간 주황 알림 카드 */
+  #bubble.alert { background: linear-gradient(135deg, #ff4d55, #ff8a3d); color: #fff;
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, .95), 0 4px 18px rgba(255, 70, 70, .6); animation: alertPulse 1s ease-in-out infinite; }
+  #bubble.alert .main { font-size: 13.5px; font-weight: 800; }
+  #bubble.alert .proj, #bubble.alert .proj .pn, #bubble.alert .sub1, #bubble.alert .small { color: #fff; }
+  #bubble.alert .small { opacity: .92; font-weight: 600; }
+  #bubble.alert .others { border-top-color: rgba(255, 255, 255, .4); }
+  @keyframes alertPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.04); } }
+  #bubble.alert.hide { animation: none; }
+  /* 오래 걸리는 작업: 한 줄로 줄여서 "작업 중"인 것만 알려준다 */
+  #bubble.compact { padding: 4px 10px; }
+  #bubble.compact .proj, #bubble.compact .sub1, #bubble.compact .small, #bubble.compact .others { display: none !important; }
+  #bubble.compact .main { font-weight: 500; font-size: 11.5px; white-space: nowrap; }
+  #bubble .proj { font-size: 11px; font-weight: 700; color: #2f7d5f; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 205px; margin-top: 1px; }
+  #bubble .proj .pn { font-weight: 400; color: #6b7a73; }
+  #bubble .sub1.wrap { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  #bubble .others { margin-top: 5px; padding-top: 4px; border-top: 1px solid rgba(0, 0, 0, .1); text-align: left; }
+  #bubble .oth { font-size: 10.5px; line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 205px; }
+  #bubble .oth b { font-weight: 700; }
+  #bubble .sub1 { font-size: 11.5px; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 205px; }
+  #bubble .small { font-size: 10.5px; opacity: .65; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 205px; }
+
+  /* ---- 펫 (모찌) ---- */
+  #pet { width: 60px; height: 55px; cursor: grab; flex: none; }
+  #pet:active { cursor: grabbing; }
+  #pet svg { width: 60px; height: 55px; overflow: visible; display: block; }
+  #pet svg * { transform-box: fill-box; }
+  .bob { transform-box: view-box; transform-origin: 60px 100px; }
+
+  /* 상태별로만 보이는 요소들 */
+  .eyes.happy, .eyes.sleepy, .eyes.wide, .eyes.x, .mouth.o, .mouth.flat,
+  .excl, .dots, .laptop, .paw, .spark, .zzz,
+  .hammer, .hit, .phones, .notes, .balls, .sweat, .broom, .dust { display: none; }
+
+  .eyes.open { animation: blink 4.2s infinite; transform-origin: center; }
+  @keyframes blink { 0%, 92%, 100% { transform: scaleY(1); } 95% { transform: scaleY(.08); } }
+
+  /* idle */
+  #pet.idle .bob { animation: breathe 3.2s ease-in-out infinite; }
+  @keyframes breathe { 0%, 100% { transform: scale(1, 1); } 50% { transform: scale(1.025, .975); } }
+
+  /* thinking */
+  #pet.thinking .bob { animation: sway 2.4s ease-in-out infinite; }
+  @keyframes sway { 0%, 100% { transform: rotate(-2.5deg); } 50% { transform: rotate(2.5deg); } }
+  #pet.thinking .eyes.open { transform: translate(-2px, -4px); animation: none; }
+  #pet.thinking .mouth.smile { display: none; }
+  #pet.thinking .mouth.flat { display: block; }
+  #pet.thinking .dots { display: block; }
+  .dots circle { fill: #7aa595; opacity: 0; animation: dotfade 1.4s infinite; }
+  .dots circle:nth-child(2) { animation-delay: .25s; }
+  .dots circle:nth-child(3) { animation-delay: .5s; }
+  @keyframes dotfade { 0%, 100% { opacity: 0; } 40%, 70% { opacity: 1; } }
+
+  /* working */
+  #pet.working .bob { animation: bob .34s ease-in-out infinite; }
+  @keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2.5px); } }
+  #pet.working .laptop, #pet.working .paw { display: block; }
+  #pet.working .eyes.open { transform: scaleY(.72); animation: none; }
+  #pet.working .mouth.smile { display: none; }
+  #pet.working .mouth.flat { display: block; }
+  .paw { fill: #BFE8D4; stroke: #7FBFA3; stroke-width: 1.5; }
+  .paw.p1 { animation: tap .34s ease-in-out infinite; }
+  .paw.p2 { animation: tap .34s ease-in-out infinite .17s; }
+  @keyframes tap { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(4px); } }
+
+  /* waiting */
+  #pet.waiting .bob { animation: hop .8s ease-in-out infinite; }
+  @keyframes hop {
+    0%, 100% { transform: translateY(0) scale(1.04, .94); }
+    45% { transform: translateY(-14px) scale(.96, 1.05); }
+  }
+  #pet.waiting .excl { display: block; animation: pulse .8s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.18); } }
+  #pet.waiting .mouth.smile { display: none; }
+  #pet.waiting .mouth.o { display: block; }
+
+  /* done */
+  #pet.done .bob { animation: cheer .55s ease-out 2; }
+  @keyframes cheer { 0% { transform: translateY(0); } 40% { transform: translateY(-16px) scale(.97, 1.04); } 100% { transform: translateY(0); } }
+  #pet.done .eyes.open { display: none; }
+  #pet.done .eyes.happy { display: block; }
+  #pet.done .spark { display: block; }
+  .spark path { fill: #f6c945; animation: twinkle 1s ease-in-out infinite; transform-origin: center; }
+  .spark path:nth-child(2) { animation-delay: .35s; }
+  @keyframes twinkle { 0%, 100% { transform: scale(.4); opacity: .5; } 50% { transform: scale(1.1); opacity: 1; } }
+
+  /* sleep */
+  #pet.sleep .bob { animation: breathe 4.6s ease-in-out infinite; }
+  #pet.sleep .eyes.open { display: none; }
+  #pet.sleep .eyes.sleepy { display: block; }
+  #pet.sleep .zzz { display: block; }
+  .zzz text { fill: #6a8f80; font-weight: 700; animation: zfloat 2.6s ease-in infinite; opacity: 0; }
+  .zzz text:nth-child(2) { animation-delay: 1.1s; }
+  @keyframes zfloat { 0% { transform: translate(0, 6px); opacity: 0; } 30% { opacity: 1; } 100% { transform: translate(8px, -12px); opacity: 0; } }
+
+  /* ---- 캐릭터 색 ---- */
+  :root { --body: #D97757; --shade: #C4694B; --paw: #E8A087; --paw-line: #B85C3E; --dots: #c9886e; --zz: #b8795f; }
+  #pet svg .c-body { fill: var(--body); }
+  #pet svg .c-shade { fill: var(--shade); }
+  #pet .paw { fill: var(--paw); stroke: var(--paw-line); }
+  #pet .dots circle { fill: var(--dots); }
+  #pet .zzz text { fill: var(--zz); }
+
+  /* ---- 시선 추적 / 몸 기울기 (대기 중에만 JS가 값을 넣는다) ---- */
+  #pet svg .gaze { transform: translate(var(--ex, 0px), var(--ey, 0px)); transition: transform .09s linear; }
+  #pet svg .tilt { transform-box: view-box; transform-origin: 60px 100px; transform: rotate(var(--tilt, 0deg)); transition: transform .15s ease-out; }
+  #pet svg .shadow { transform: translateX(var(--sx, 0px)); transition: transform .15s ease-out; }
+
+  /* ---- 새 애니메이션 (클로드 캐릭터) ---- */
+  #pet svg .arm.l { transform-origin: 100% 50%; }
+  #pet svg .arm.r { transform-origin: 0% 50%; }
+
+  /* 건설: 망치질 */
+  #pet.building .bob { animation: bob .42s ease-in-out infinite; }
+  #pet.building .hammer, #pet.building .hit { display: block; }
+  #pet.building .eyes.open { transform: scaleY(.7); animation: none; }
+  #pet svg .hammer { transform-origin: 50% 100%; animation: swing .42s ease-in infinite; }
+  @keyframes swing { 0%, 100% { transform: rotate(-60deg); } 50%, 62% { transform: rotate(8deg); } }
+  #pet svg .hit { animation: hitfx .42s linear infinite; }
+  @keyframes hitfx { 0%, 44%, 80%, 100% { opacity: 0; } 52%, 62% { opacity: 1; } }
+
+  /* 서브에이전트 1개: 헤드폰 그루브 */
+  #pet.groove .bob { animation: groove .6s ease-in-out infinite alternate; }
+  @keyframes groove { 0% { transform: translateY(0) rotate(-3.5deg); } 100% { transform: translateY(-4px) rotate(3.5deg); } }
+  #pet.groove .phones, #pet.groove .notes { display: block; }
+  #pet.groove .eyes.open { animation: none; transform: scaleY(.6); }
+  .notes text { animation: notefloat 1.8s ease-in infinite; opacity: 0; }
+  .notes text:nth-child(2) { animation-delay: .9s; }
+  @keyframes notefloat { 0% { transform: translateY(8px); opacity: 0; } 30% { opacity: 1; } 100% { transform: translateY(-14px); opacity: 0; } }
+
+  /* 서브에이전트 2개 이상: 저글링 */
+  #pet.juggling .balls { display: block; }
+  #pet.juggling .bob { animation: bob .5s ease-in-out infinite; }
+  #pet.juggling .arm.l { animation: armsUpL .45s ease-in-out infinite alternate; }
+  #pet.juggling .arm.r { animation: armsUpR .45s ease-in-out infinite alternate; }
+  @keyframes armsUpL { 0% { transform: rotate(10deg); } 100% { transform: rotate(-40deg); } }
+  @keyframes armsUpR { 0% { transform: rotate(-40deg); } 100% { transform: rotate(10deg); } }
+  .balls circle { animation: juggle 1.35s linear infinite; }
+  .balls .b2 { animation-delay: -.45s; }
+  .balls .b3 { animation-delay: -.9s; }
+  @keyframes juggle {
+    0% { transform: translate(-24px, 8px); } 25% { transform: translate(-12px, -18px); }
+    50% { transform: translate(24px, 8px); } 75% { transform: translate(0, -2px); } 100% { transform: translate(-24px, 8px); }
+  }
+
+  /* 오류: X 눈 + 떨림 + 땀방울 */
+  #pet.error .eyes.open { display: none; }
+  #pet.error .eyes.x, #pet.error .sweat { display: block; }
+  #pet.error .bob { animation: shake .1s linear 10 forwards; }
+  @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-2.5px); } 75% { transform: translateX(2.5px); } }
+  #pet svg .sweat { animation: sweatfall 1.2s ease-in infinite; }
+  @keyframes sweatfall { 0% { transform: translateY(0); opacity: 1; } 100% { transform: translateY(12px); opacity: 0; } }
+
+  /* 대화 정리: 빗자루질 */
+  #pet.sweeping .broom, #pet.sweeping .dust { display: block; }
+  #pet.sweeping .bob { animation: bob .7s ease-in-out infinite; }
+  #pet svg .broom { transform-origin: 50% 100%; animation: sweepmove .7s ease-in-out infinite alternate; }
+  @keyframes sweepmove { 0% { transform: translateX(-34px) rotate(-8deg); } 100% { transform: translateX(-4px) rotate(8deg); } }
+  #pet svg .dust circle { animation: dustpuff .7s ease-out infinite alternate; }
+  @keyframes dustpuff { 0% { transform: translate(0, 0) scale(.4); opacity: 0; } 100% { transform: translate(-8px, -6px) scale(1.1); opacity: .8; } }
+
+  /* 잠들기 전 연출: 하품 → 졸기 → 쓰러짐 */
+  #pet.yawn .eyes.open, #pet.doze .eyes.open, #pet.collapse .eyes.open { display: none; }
+  #pet.yawn .eyes.sleepy, #pet.doze .eyes.sleepy, #pet.collapse .eyes.sleepy { display: block; }
+  #pet.yawn .mouth.smile { display: none; }
+  #pet.yawn .mouth.o { display: block; }
+  #pet.yawn .bob { animation: yawn 1.8s ease-in-out; }
+  @keyframes yawn { 0%, 100% { transform: scale(1, 1); } 50% { transform: scale(.95, 1.09); } }
+  #pet.doze .bob { animation: nod 1.4s ease-in-out infinite; }
+  @keyframes nod { 0%, 100% { transform: rotate(0); } 50% { transform: rotate(6deg) translateY(2px); } }
+  #pet.collapse .bob { animation: collapse .7s ease-in forwards; }
+  @keyframes collapse { 0% { transform: rotate(6deg); } 70% { transform: rotate(0) scale(1.1, .8); } 100% { transform: scale(1.12, .78); } }
+
+  /* 깜짝 놀람 (잠에서 깰 때) */
+  #pet.startle .eyes.open { display: none; }
+  #pet.startle .eyes.wide, #pet.startle .excl, #pet.startle .mouth.o { display: block; }
+  #pet.startle .mouth.smile { display: none; }
+  #pet.startle .bob { animation: startle .8s ease-out; }
+  @keyframes startle { 0% { transform: translateY(0); } 25% { transform: translateY(-18px) scale(.95, 1.08); } 60% { transform: translateY(0) scale(1.08, .92); } 100% { transform: translateY(0); } }
+
+  /* 클릭 반응: 두 번 = 콕, 네 번 = 허우적 */
+  #pet.poke .eyes.open { display: none; }
+  #pet.poke .eyes.happy { display: block; }
+  #pet.poke .bob { animation: poke .55s ease-out; }
+  @keyframes poke { 0% { transform: scale(1); } 30% { transform: scale(1.14, .84); } 62% { transform: translateY(-9px) scale(.93, 1.1); } 100% { transform: scale(1); } }
+  #pet.flail .eyes.open { display: none; }
+  #pet.flail .eyes.wide { display: block; }
+  #pet.flail .bob { animation: flailbody .28s linear infinite; }
+  @keyframes flailbody { 0%, 100% { transform: rotate(-4deg); } 50% { transform: rotate(4deg) translateY(-3px); } }
+  #pet.flail .arm.l { animation: flapL .14s ease-in-out infinite alternate; }
+  #pet.flail .arm.r { animation: flapR .14s ease-in-out infinite alternate; }
+  @keyframes flapL { 0% { transform: rotate(-55deg); } 100% { transform: rotate(35deg); } }
+  @keyframes flapR { 0% { transform: rotate(55deg); } 100% { transform: rotate(-35deg); } }
+
+  /* 드래그 중: 대롱대롱 */
+  #pet.dragging .eyes.open { display: none; }
+  #pet.dragging .eyes.wide { display: block; }
+  #pet.dragging .bob { transform-origin: 50% 0%; animation: dangle .5s ease-in-out infinite alternate; }
+  @keyframes dangle { 0% { transform: rotate(-6deg); } 100% { transform: rotate(6deg); } }
+  #pet.dragging .arm.l { transform: rotate(40deg); }
+  #pet.dragging .arm.r { transform: rotate(-40deg); }
+
+  /* ---- 미니 모드: 화면 오른쪽 끝에 붙어 있을 때 ---- */
+  #stage.mini #zTop, #stage.mini #zBot, #stage.mini #mid { justify-content: flex-end; padding-right: 100px; }
+  #stage.mini #mid { width: 100%; align-items: flex-end; justify-content: flex-end; }
+  #stage.mini #bubble { max-width: 160px; }
+  #stage.mini #bubble::after { left: auto; right: 24px; margin-left: 0; }
+  /* 왼쪽 가장자리에 붙을 때는 거울처럼 반대로 */
+  #stage.mini.mini-left #zTop, #stage.mini.mini-left #zBot, #stage.mini.mini-left #mid { justify-content: flex-start; padding-left: 100px; padding-right: 0; }
+  #stage.mini.mini-left #mid { align-items: flex-start; }
+  #stage.mini.mini-left #bubble::after { left: 24px; right: auto; }
+  #stage.mini-hidden #limits { visibility: hidden; }
+  /* 숨은 상태에서는 사용량/프로젝트/다른 세션은 숨기고, 짧은 상태(작업 중… / 완료)만 작은 말풍선으로 보여준다 */
+  #stage.mini-hidden #bubble:not(.chip) { visibility: hidden; }
+  #bubble.chip { padding: 3px 9px; }
+  #bubble.chip .proj, #bubble.chip .sub1, #bubble.chip .small, #bubble.chip .others { display: none !important; }
+  #bubble.chip .main { font-weight: 600; font-size: 11.5px; white-space: nowrap; }
+  /* 화면에 보이는 25px 쪽으로 말풍선을 붙인다 (오른쪽 숨김: 창의 125px 까지가 화면, 왼쪽 숨김: 135px 부터가 화면) */
+  #stage.mini-hidden.mini #zTop { padding-right: 135px; }
+  #stage.mini-hidden.mini.mini-left #zTop { padding-right: 0; padding-left: 135px; }
+  #stage.mini-hidden.mini #bubble::after { right: 12px; }
+  #stage.mini-hidden.mini.mini-left #bubble::after { left: 12px; right: auto; }
+  /* 위쪽에 숨으면 말풍선이 펫 바로 아래로 오게 사용량 막대 자리만큼 끌어올린다 */
+  #stage.mini-hidden.side-top #zBot { margin-top: -52px; }
+</style>
+</head>
+<body>
+<div id="stage">
+ <div id="zTop">
+  <div id="bubble" class="hide"><div class="main" id="bMain"></div><div class="proj" id="bProj"></div><div class="sub1" id="bSub1"></div><div class="small" id="bSub2"></div><div class="others" id="bOthers"></div></div>
+ </div>
+ <div id="mid">
+  <div id="pet" class="idle">
+    <svg class="clawd" viewBox="0 0 120 110" aria-label="Claude Pet" shape-rendering="crispEdges">
+      <ellipse class="shadow" cx="60" cy="102" rx="36" ry="5" fill="rgba(0,0,0,.14)" shape-rendering="geometricPrecision"/>
+      <g class="tilt"><g class="bob">
+        <!-- 다리 -->
+        <rect class="c-shade" x="32" y="80" width="9" height="16"/>
+        <rect class="c-shade" x="46" y="80" width="9" height="16"/>
+        <rect class="c-shade" x="65" y="80" width="9" height="16"/>
+        <rect class="c-shade" x="79" y="80" width="9" height="16"/>
+        <!-- 팔 -->
+        <rect class="arm l c-body" x="10" y="50" width="14" height="16"/>
+        <rect class="arm r c-body" x="96" y="50" width="14" height="16"/>
+        <!-- 몸 -->
+        <rect class="c-body" x="22" y="30" width="76" height="52"/>
+        <rect class="c-shade" x="22" y="74" width="76" height="8"/>
+
+        <!-- 눈 -->
+        <g class="gaze">
+        <g class="eyes open">
+          <rect x="41" y="47" width="9" height="15" fill="#2b1d16"/>
+          <rect x="70" y="47" width="9" height="15" fill="#2b1d16"/>
+        </g>
+        <g class="eyes happy" fill="none" stroke="#2b1d16" stroke-width="4" stroke-linejoin="miter">
+          <path d="M38 60 L45.5 51 L53 60"/><path d="M67 60 L74.5 51 L82 60"/>
+        </g>
+        <g class="eyes sleepy" fill="none" stroke="#2b1d16" stroke-width="4">
+          <path d="M39 56 H52"/><path d="M68 56 H81"/>
+        </g>
+        <g class="eyes wide">
+          <rect x="39" y="43" width="13" height="20" fill="#2b1d16"/><rect x="68" y="43" width="13" height="20" fill="#2b1d16"/>
+          <rect x="43" y="46" width="4" height="5" fill="#fff"/><rect x="72" y="46" width="4" height="5" fill="#fff"/>
+        </g>
+        <g class="eyes x" fill="none" stroke="#2b1d16" stroke-width="3.5">
+          <path d="M39 48 L51 61 M51 48 L39 61"/><path d="M69 48 L81 61 M81 48 L69 61"/>
+        </g>
+        </g>
+        <!-- 입 (하품/놀람/확인 필요 때만) -->
+        <rect class="mouth o" x="54" y="64" width="12" height="9" fill="#2b1d16"/>
+
+        <!-- 작업 중: 노트북 + 팔 -->
+        <g class="laptop">
+          <rect x="34" y="84" width="52" height="20" fill="#5b6b76" stroke="#46535c" stroke-width="1.5"/>
+          <rect x="54" y="90" width="12" height="8" fill="#8fa3ae"/>
+        </g>
+        <rect class="paw p1" x="38" y="80" width="16" height="8"/>
+        <rect class="paw p2" x="66" y="80" width="16" height="8"/>
+
+
+        <!-- 건설 중: 망치 -->
+        <g class="hammer">
+          <rect x="102" y="36" width="5" height="34" fill="#a9825a"/>
+          <rect x="95" y="30" width="19" height="9" fill="#6b7680" stroke="#4a545c" stroke-width="1"/>
+        </g>
+        <g class="hit"><path d="M112 70 L120 66 M113 74 L122 74 M112 78 L120 82" stroke="#f6c945" stroke-width="2.5" fill="none"/></g>
+
+        <!-- 서브에이전트 1개: 헤드폰 + 음표 -->
+        <g class="phones">
+          <path d="M28 40 Q60 4 92 40" fill="none" stroke="#3a3f47" stroke-width="5"/>
+          <rect x="19" y="38" width="10" height="22" fill="#3a3f47"/><rect x="91" y="38" width="10" height="22" fill="#3a3f47"/>
+        </g>
+        <g class="notes">
+          <text x="100" y="26" font-size="14" fill="#7a5b8c">♪</text>
+          <text x="10" y="30" font-size="16" fill="#7a5b8c">♫</text>
+        </g>
+
+        <!-- 서브에이전트 2개 이상: 공 저글링 -->
+        <g class="balls">
+          <circle class="b1" cx="60" cy="26" r="5" fill="#6aa7e6"/>
+          <circle class="b2" cx="60" cy="26" r="5" fill="#f6c945"/>
+          <circle class="b3" cx="60" cy="26" r="5" fill="#8fd18b"/>
+        </g>
+
+        <!-- 오류: 땀방울 -->
+        <path class="sweat" d="M100 34 Q96 42 100 46 Q104 42 100 34 Z" fill="#7fc4f0"/>
+
+        <!-- 대화 정리: 빗자루 + 먼지 -->
+        <g class="broom">
+          <rect x="94" y="46" width="4" height="46" fill="#a9825a"/>
+          <path d="M88 90 H104 L108 102 H84 Z" fill="#d9b77a" stroke="#b08e55" stroke-width="1"/>
+        </g>
+        <g class="dust">
+          <circle cx="30" cy="100" r="3" fill="#cdbfae"/><circle cx="22" cy="96" r="2.2" fill="#cdbfae"/><circle cx="36" cy="95" r="2" fill="#cdbfae"/>
+        </g>
+
+        <!-- 확인 필요: 느낌표 -->
+        <g class="excl">
+          <rect x="100" y="4" width="9" height="22" fill="#ff6b6b"/>
+          <rect x="100" y="29" width="9" height="9" fill="#ff6b6b"/>
+        </g>
+
+        <!-- 생각 중: 점 세 개 -->
+        <g class="dots">
+          <circle cx="92" cy="22" r="3"/><circle cx="102" cy="14" r="3.6"/><circle cx="113" cy="6" r="4.2"/>
+        </g>
+
+        <!-- 완료: 반짝이 -->
+        <g class="spark">
+          <path d="M16 26 L19 18 L22 26 L30 29 L22 32 L19 40 L16 32 L8 29 Z"/>
+          <path d="M100 20 L102.5 14 L105 20 L111 22.5 L105 25 L102.5 31 L100 25 L94 22.5 Z"/>
+        </g>
+
+        <!-- 수면: z -->
+        <g class="zzz">
+          <text x="92" y="30" font-size="15">z</text>
+          <text x="100" y="20" font-size="20">Z</text>
+        </g>
+      </g>
+      </g>
+    </svg>
+  </div>
+  <div id="limits">
+    <div class="lim none" id="lim5"><span class="t">세션</span><div class="bar"><i></i></div><span class="p">–</span></div>
+    <div class="lim none" id="lim7"><span class="t">주</span><div class="bar"><i></i></div><span class="p">–</span></div>
+    <div id="limHint"></div>
+  </div>
+ </div>
+ <div id="zBot"></div>
+</div>
+
+<script>
+  const $ = (s) => document.querySelector(s);
+  const petEl = $('#pet');
+  const bubble = $('#bubble');
+
+  const LABEL = {
+    thinking: '생각 중…',
+    working: '작업 중',
+    building: '만드는 중',
+    error: '앗, 오류가 났어요',
+    sweeping: '대화 정리 중',
+    waiting: '✋ 확인이 필요해요',
+    done: '끝났어요 ✓',
+  };
+  // 숨김 모드에서 보여줄 짧은 상태 문구
+  const CHIP = { thinking: '생각 중…', working: '작업 중…', building: '작업 중…', groove: '작업 중…', juggling: '작업 중…', sweeping: '정리 중…', error: '오류', waiting: '✋ 확인 필요!', done: '완료' };
+  function labelOf(s, key) {
+    if (key === 'groove' || key === 'juggling') return `서브에이전트 ${s.subagents || 1}개 작업 중`;
+    return LABEL[key];
+  }
+
+  function setLine(el, text) {
+    el.textContent = text || '';
+    el.style.display = text ? 'block' : 'none';
+  }
+
+  // ---------- 말풍선: 어느 프로젝트에서 무슨 일을 하는지 ----------
+  //   작업 중 ×2 · 3/7        상태 (×동시 세션 수 · 할 일 진행률)
+  //   📁 프로젝트 이름         지금 보고 있는 세션의 프로젝트
+  //   UI 단순화 중             지금 하는 일 (할 일 > Claude가 방금 한 말 > 내 프롬프트)
+  //   수정 · index.html        방금 실행한 도구와 대상
+  //   ─────────────
+  //   ● 다른프로젝트 · 명령…    그 밖에 동시에 돌아가는 세션들
+  const DOT = { working: '🟢', thinking: '🟡', waiting: '🔴' };
+
+  function renderOthers(list) {
+    const box = $('#bOthers');
+    box.textContent = '';
+    box.style.display = list.length ? 'block' : 'none';
+    for (const o of list) {
+      const row = document.createElement('div');
+      row.className = 'oth';
+      if (o.appId) row.dataset.app = o.appId;
+      const name = document.createElement('b');
+      name.textContent = o.project || '세션';
+      row.append(`${DOT[o.state] || '·'} `, name, o.text ? ` · ${o.text}` : '');
+      box.appendChild(row);
+    }
+  }
+
+  // 📁 세션이름 · 프로젝트   (세션 이름이 없으면 프로젝트만)
+  function renderProj(s) {
+    const el = $('#bProj');
+    el.textContent = '';
+    const head = s.name || s.project;
+    el.style.display = head ? 'block' : 'none';
+    if (!head) return;
+    el.append('📁 ', head);
+    if (s.name && s.project && s.project !== s.name) {
+      const pn = document.createElement('span');
+      pn.className = 'pn';
+      pn.textContent = ' · ' + s.project;
+      el.appendChild(pn);
+    }
+  }
+
+  // 펫이 화면 위쪽 끝에 가까워서 말풍선이 메뉴바에 가리게 되면, 말풍선을 펫 아래 칸으로 옮긴다.
+  // 펫은 가운데 칸에 고정이라 말풍선이 위아래로 옮겨가도 펫 위치는 변하지 않는다.
+  function updateFlip() {
+    const petTop = window.screenY + petEl.getBoundingClientRect().top;
+    const need = bubble.offsetHeight + 16;
+    const top = (window.screen && window.screen.availTop) || 0;
+    const below = petTop - need < top;
+    const holder = $(below ? '#zBot' : '#zTop');
+    if (bubble.parentElement !== holder) holder.appendChild(bubble);
+    bubble.classList.toggle('below', below);
+  }
+
+  const LONG_MS = 15 * 60 * 1000;
+  const COMPACT_OK = new Set(['thinking', 'working', 'building', 'groove', 'juggling', 'sweeping']);
+  function fmtElapsed(ms) {
+    const m = Math.floor(ms / 60000);
+    if (m < 1) return Math.floor(ms / 1000) + '초';
+    return m < 60 ? m + '분' : Math.floor(m / 60) + '시간 ' + (m % 60) + '분';
+  }
+  let lastStatus = null;
+
+  function renderBubble(s) {
+    const key = s.anim || s.state;
+    // 숨김 모드: 짧은 상태만 (작업 중… / 완료 등)
+    if (s.mini === 'hidden') {
+      const label = CHIP[key];
+      if (!label) {
+        bubble.classList.add('hide');
+        return;
+      }
+      bubble.classList.remove('hide', 'compact');
+      bubble.classList.add('chip');
+      bubble.classList.toggle('alert', key === 'waiting');
+      $('#bMain').textContent = label;
+      for (const id of ['#bProj', '#bSub1', '#bSub2', '#bOthers']) $(id).style.display = 'none';
+      updateFlip();
+      return;
+    }
+    bubble.classList.remove('chip');
+    bubble.classList.toggle('alert', key === 'waiting');
+    let main = labelOf(s, key);
+    if (!main) {
+      bubble.classList.add('hide');
+      return;
+    }
+    const prog = s.progress;
+    if (s.active > 1 && s.state !== 'done' && key !== 'groove' && key !== 'juggling') main += ` ×${s.active}`;
+    if (prog) main += ` · ${prog.done}/${prog.total}`;
+
+    let sub1;
+    if (s.state === 'waiting') sub1 = s.msg || s.note || s.title;
+    else if (s.state === 'done') sub1 = s.answer || s.note || s.title;
+    else sub1 = (prog && prog.current) || s.note || s.title;
+
+    let sub2 = s.activity;
+    if (!sub2 && s.state !== 'done' && s.title && sub1 !== s.title) sub2 = s.title;
+    if (key === 'waiting') sub2 = '눌러서 Claude 앱에서 허용하기 →'; // 허용이 필요한 걸 놓치지 않게 안내 (이 카드를 누르면 그 세션이 열린다)
+
+    if (key === 'waiting' && s.waitSince) {
+      const sec = Math.floor((Date.now() - s.waitSince) / 1000);
+      if (sec >= 10) main += ` · ${sec}초째`; // 얼마나 기다리게 했는지
+    }
+    // 15분 넘게 이어지는 작업은 간략하게: "작업 중 · 5분" 한 줄만 (확인 필요/오류/완료는 그대로 자세히)
+    const compact = !!s.since && Date.now() - s.since > LONG_MS && COMPACT_OK.has(key);
+    bubble.classList.toggle('compact', compact);
+    if (compact) main = `${main.split(' · ')[0]} · ${fmtElapsed(Date.now() - s.since)}`;
+
+    $('#bMain').textContent = main;
+    renderProj(s);
+    setLine($('#bSub1'), sub1);
+    $('#bSub1').classList.toggle('wrap', s.state === 'done'); // 답변 첫 줄은 두 줄까지 보여준다
+    setLine($('#bSub2'), sub2);
+    renderOthers(s.others || []);
+    bubble.classList.remove('hide');
+    updateFlip();
+  }
+
+  // ---------- 한도 막대 (Claude Code가 넘겨주는 실제 사용률) ----------
+  function setLimit(id, w) {
+    const row = $(id);
+    const bar = row.querySelector('i');
+    const txt = row.querySelector('.p');
+    if (!w) {
+      row.classList.add('none');
+      bar.style.width = '0%';
+      txt.textContent = '–';
+      return;
+    }
+    row.classList.remove('none');
+    const pct = Math.max(0, Math.min(100, w.pct));
+    bar.style.width = pct + '%';
+    bar.style.background = pct >= 90 ? 'var(--bad)' : pct >= 70 ? 'var(--warn)' : 'var(--ok)';
+    txt.textContent = Math.round(pct) + '%';
+  }
+
+  // ---------- 펫 모습: 앱이 알려준 상태(base) + 잠깐 끼어드는 연출(local) ----------
+  //   base : idle thinking working building groove juggling error sweeping waiting done sleep
+  //   local: yawn → doze → collapse → sleep (60초 대기 후), startle(깜짝), poke/flail(클릭)
+  let base = 'idle';
+  let local = null;
+  let awake = false; // 앱은 sleep 이라는데 사용자가 깨운 상태
+  let dragging = false;
+  let idleTimer = null;
+  let localTimer = null;
+  let gaze = { dx: 0, dy: 0 };
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+  const visual = () => local || (base === 'sleep' && awake ? 'idle' : base);
+
+  function applyGaze() {
+    const k = visual() === 'idle' && !dragging ? 1 : 0; // 대기 중일 때만 커서를 바라본다
+    const tilt = clamp(gaze.dx / 140, -3, 3) * k;
+    petEl.style.setProperty('--ex', (clamp(gaze.dx / 50, -3, 3) * k).toFixed(2) + 'px');
+    petEl.style.setProperty('--ey', (clamp(gaze.dy / 50, -2.5, 2.5) * k).toFixed(2) + 'px');
+    petEl.style.setProperty('--tilt', tilt.toFixed(2) + 'deg');
+    petEl.style.setProperty('--sx', (-tilt * 1.2).toFixed(2) + 'px');
+  }
+
+  function paint() {
+    const v = visual();
+    petEl.className = v + (dragging ? ' dragging' : '');
+    applyGaze();
+  }
+
+  function setLocal(name, ms, after) {
+    clearTimeout(localTimer);
+    local = name;
+    paint();
+    if (ms) {
+      localTimer = setTimeout(() => {
+        local = null;
+        paint();
+        if (after) after();
+      }, ms);
+    }
+  }
+
+  // 대기 상태가 60초 이어지면 하품 → 졸기 → 쓰러짐 → 수면
+  function scheduleSleep() {
+    clearTimeout(idleTimer);
+    idleTimer = null;
+    if (local || visual() !== 'idle') return;
+    idleTimer = setTimeout(() => {
+      idleTimer = null;
+      setLocal('yawn', 1800, () => setLocal('doze', 2600, () => setLocal('collapse', 800, () => setLocal('sleep', 0))));
+    }, 60000);
+  }
+
+  // 자는 펫이 깨어난다 (커서가 가까이 오거나 클릭했을 때)
+  function wake() {
+    clearTimeout(idleTimer);
+    idleTimer = null;
+    if (base === 'sleep') awake = true;
+    setLocal('startle', 900, scheduleSleep);
+  }
+
+  const isAsleep = () => local === 'sleep' || local === 'yawn' || local === 'doze' || local === 'collapse' || (base === 'sleep' && !awake && !local);
+
+  window.api.onCursor((d) => {
+    gaze = d;
+    applyGaze();
+    if (local === 'sleep' || (base === 'sleep' && !awake && !local)) {
+      if (Math.hypot(d.dx, d.dy) < 150) wake();
+    }
+  });
+
+  let currentAppId = '';
+  // 경과 시간이 흐르도록 1초마다 (오래 걸리는 작업일 때만) 말풍선을 다시 그린다
+  setInterval(() => {
+    if (lastStatus && ((lastStatus.since && COMPACT_OK.has(lastStatus.anim || lastStatus.state)) || (lastStatus.waitSince && (lastStatus.anim || lastStatus.state) === 'waiting'))) renderBubble(lastStatus);
+  }, 1000);
+
+  window.api.onStatus((s) => {
+    document.documentElement.dataset.profile = s.profile || 'default';
+    lastStatus = s;
+    currentAppId = s.appId || '';
+    const next = s.anim || s.state;
+    if (next !== base) {
+      base = next;
+      awake = false;
+      clearTimeout(localTimer);
+      clearTimeout(idleTimer);
+      idleTimer = null;
+      local = null;
+    }
+    paint();
+    if (!local && !idleTimer) scheduleSleep();
+    const st = $('#stage');
+    // 좌우 가장자리일 때만 말풍선/막대를 가장자리 쪽으로 붙인다. 위/아래에서는 말풍선이 펫 아래/위로 나온다.
+    st.classList.toggle('mini', !!s.mini && s.mini !== 'off' && (s.miniSide === 'left' || s.miniSide === 'right'));
+    st.classList.toggle('mini-hidden', s.mini === 'hidden');
+    st.classList.toggle('mini-left', s.miniSide === 'left');
+    st.classList.toggle('side-top', !!s.mini && s.mini !== 'off' && s.miniSide === 'top');
+    st.classList.toggle('side-bottom', !!s.mini && s.mini !== 'off' && s.miniSide === 'bottom');
+    renderBubble(s);
+    const lim = s.limits || {};
+    setLimit('#lim5', lim.fiveHour);
+    setLimit('#lim7', lim.sevenDay);
+    // 값이 하나도 없을 때는 왜 비었는지 알려준다 (README의 "사용량이 안 보여요" 참고)
+    const hint = $('#limHint');
+    const empty = !lim.fiveHour && !lim.sevenDay;
+    hint.style.display = empty ? 'block' : 'none';
+    hint.textContent = empty ? lim.hint || '' : '';
+  });
+
+  // ---------- 드래그 / 마우스 통과 ----------
+  let drag = null;
+  let lastIgnore = null;
+  function setIgnore(v) {
+    if (v === lastIgnore) return;
+    lastIgnore = v;
+    window.api.setIgnore(v);
+  }
+
+  petEl.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    drag = { x: e.screenX, y: e.screenY, moved: 0 };
+    setIgnore(false);
+    if (isAsleep()) wake(); // 자는 펫을 건드리면 깜짝 놀라며 깬다
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (drag) {
+      const dx = e.screenX - drag.x;
+      const dy = e.screenY - drag.y;
+      drag.x = e.screenX;
+      drag.y = e.screenY;
+      drag.moved += Math.abs(dx) + Math.abs(dy);
+      if (drag.moved > 4 && (dx || dy)) {
+        if (!dragging) {
+          dragging = true;
+          paint();
+        }
+        window.api.drag(dx, dy);
+        updateFlip();
+      }
+      return;
+    }
+    const over = !!e.target.closest('#pet, #limits, #bubble:not(.hide)');
+    setIgnore(!over);
+  });
+
+  window.addEventListener('mouseup', () => {
+    if (!drag) return;
+    const moved = drag.moved;
+    drag = null;
+    if (moved > 4) {
+      dragging = false;
+      paint();
+      window.api.dragEnd();
+      updateFlip();
+    } else {
+      onPetClick();
+    }
+  });
+
+  // 클릭 반응: 두 번 연속 = 콕(poke), 네 번 연속 = 허우적(flail)
+  let clicks = [];
+  function onPetClick() {
+    if (isAsleep() || local === 'startle') return;
+    const now = Date.now();
+    clicks = clicks.filter((t) => now - t < 1200).concat(now);
+    if (clicks.length >= 4) {
+      clicks = [];
+      setLocal('flail', 1500, scheduleSleep);
+    } else if (clicks.length === 2) {
+      setLocal('poke', 600, scheduleSleep);
+      window.api.openApp(currentAppId); // 더블클릭: 지금 보고 있는 세션을 Claude 앱에서 연다 (세션을 모르면 앱만 앞으로)
+    }
+  }
+
+  // 말풍선을 누르면 그 세션을 Claude 앱에서 연다 (아래쪽 다른 세션 줄을 누르면 그 세션)
+  bubble.addEventListener('click', (e) => {
+    const row = e.target.closest('.oth');
+    window.api.openApp(row ? row.dataset.app || '' : currentAppId);
+  });
+
+  document.addEventListener('mouseleave', () => { if (!drag) setIgnore(true); });
+  window.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    if (e.target.closest('#pet, #limits, #bubble')) window.api.menu();
+  });
+
+  window.api.ready();
+</script>
+</body>
+</html>

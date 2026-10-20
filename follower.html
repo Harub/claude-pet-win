@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>Claude Pet 알림</title>
+<style>
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; -webkit-user-select: none; user-select: none; cursor: default;
+    font-family: -apple-system, "SF Pro Text", "Apple SD Gothic Neo", "Segoe UI", "Malgun Gothic", "Noto Sans KR", sans-serif; }
+  /* 허용을 오래 안 누르면 마우스 옆을 따라다니는 작은 알림 */
+  #pill { display: inline-block; margin: 4px; padding: 6px 12px; border-radius: 999px; color: #fff; font-weight: 700; font-size: 13px; white-space: nowrap;
+    background: linear-gradient(135deg, #ff4d55, #ff8a3d); box-shadow: 0 0 0 2px rgba(255, 255, 255, .95), 0 4px 14px rgba(255, 70, 70, .6);
+    animation: bounce .9s ease-in-out infinite; }
+  @keyframes bounce { 0%, 100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-2px) scale(1.05); } }
+</style>
+</head>
+<body>
+<div id="pill"></div>
+<script>
+  // 문구는 주소의 ?t= 로 받는다 (textContent 로만 넣어서 HTML 로 해석되지 않는다)
+  document.getElementById('pill').textContent = new URLSearchParams(location.search).get('t') || '허용 필요 ✋';
+</script>
+</body>
+</html>
